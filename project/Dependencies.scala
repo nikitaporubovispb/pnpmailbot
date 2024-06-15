@@ -20,8 +20,6 @@ object Dependencies {
     "org.typelevel"         %% "cats-core"        % Versions.cats,
     "com.github.pureconfig" %% "pureconfig-core"  % Versions.pureconfig,
     "com.sun.mail"          % "jakarta.mail"      % Versions.mail
-//    "jakarta.mail" % "jakarta.mail-api" % "2.0.1",
-//    "org.eclipse.angus" % "jakarta.mail" % "1.0.0"
   )
 
   val all: Seq[ModuleID] = misc ++ distage

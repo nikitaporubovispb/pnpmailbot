@@ -8,20 +8,27 @@ import fs2.Stream
 import logstage.LogIO
 
 object Telegram {
-  def run(using config: Config, log: LogIO[IO]): IO[Unit] = {
+  def run(using smtp: Smtp, config: BotConfig, log: LogIO[IO]): IO[Unit] = {
     Stream
-      .resource(TelegramClient[IO](config.bot.apiKey))
-      .flatMap { case given TelegramClient[IO] => Bot.polling[IO].follow(hi[IO]) }
+      .resource(TelegramClient[IO](config.apiKey))
+      .flatMap { case given TelegramClient[IO] => Bot.polling[IO].follow(sendMail) }
       .compile
       .drain
   }
 
-  private def hi[F[_] : TelegramClient: LogIO]: Scenario[F, Unit] =
+  private def sendMail[F[_]](using c: TelegramClient[IO], l: LogIO[IO], smtp: Smtp): Scenario[IO, Unit] =
     for {
-      _     <- Scenario.eval(LogIO[F].info("Greetings scenario started."))
-      chat  <- Scenario.expect(command("hi").chat)
-      _     <- Scenario.eval(chat.send("Hello. What's your name?"))
-      name  <- Scenario.expect(text)
-      _     <- Scenario.eval(chat.send(s"Nice to meet you, $name"))
+      _       <- Scenario.eval(LogIO[IO].info("Send mail scenario started."))
+      chat    <- Scenario.expect(command("send_mail").chat)
+      _       <- Scenario.eval(chat.send("from?"))
+      from    <- Scenario.expect(text)
+      _       <- Scenario.eval(chat.send("to?"))
+      to      <- Scenario.expect(text)
+      _       <- Scenario.eval(chat.send("subject?"))
+      subject <- Scenario.expect(text)
+      _       <- Scenario.eval(chat.send("text?"))
+      content <- Scenario.expect(text)
+      _       <- Scenario.eval(smtp.sendMail(from, to, subject, content))
+      _       <- Scenario.eval(chat.send("successful sent!!!"))
     } yield ()
 }

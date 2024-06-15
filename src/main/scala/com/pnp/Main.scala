@@ -15,8 +15,10 @@ object Main extends IOApp {
       config <- Config.load.toResource
       log <- createLogger.toResource
     } yield (config, log)
-    resources.use { case (config, log) => Telegram.run(using config, log) }
-      .as(ExitCode.Success)
+    resources.use { case (config, log) =>
+        val smtp = Smtp(using config.smtp, log)
+        Telegram.run(using smtp, config.bot, log)
+      }.as(ExitCode.Success)
   }
 }
 

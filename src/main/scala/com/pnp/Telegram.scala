@@ -28,7 +28,10 @@ object Telegram {
       subject <- Scenario.expect(text)
       _       <- Scenario.eval(chat.send("text?"))
       content <- Scenario.expect(text)
-      _       <- Scenario.eval(smtp.sendMail(from, to, subject, content))
-      _       <- Scenario.eval(chat.send("successful sent!!!"))
+      result  <- Scenario.eval(smtp.sendMail(from, to, subject, content))
+      _       <- result match {
+        case Left(value) => Scenario.eval(chat.send(s"Error =( $value"))
+        case Right(_) => Scenario.eval(chat.send("Successful sent!!!"))
+      }
     } yield ()
 }

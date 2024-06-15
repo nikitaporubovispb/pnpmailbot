@@ -3,10 +3,11 @@ import sbt.*
 object Dependencies {
   object Versions {
     val catsEffect = "3.5.4"
-    val cats = "2.10.0"
-    val pureconfig = "0.17.6"
-    val logstage = "1.2.5"
+    val cats = "2.12.0"
+    val pureconfig = "0.17.7"
+    val logstage = "1.2.8"
     val canoe = "0.6.0"
+    val mail = "2.0.1"
   }
 
   val distage: Seq[ModuleID] = Seq(
@@ -17,7 +18,10 @@ object Dependencies {
     "org.augustjune"        %% "canoe"            % Versions.canoe,
     "org.typelevel"         %% "cats-effect"      % Versions.catsEffect,
     "org.typelevel"         %% "cats-core"        % Versions.cats,
-    "com.github.pureconfig" %% "pureconfig-core"  % Versions.pureconfig
+    "com.github.pureconfig" %% "pureconfig-core"  % Versions.pureconfig,
+    "com.sun.mail"          % "jakarta.mail"      % Versions.mail
+//    "jakarta.mail" % "jakarta.mail-api" % "2.0.1",
+//    "org.eclipse.angus" % "jakarta.mail" % "1.0.0"
   )
 
   val all: Seq[ModuleID] = misc ++ distage

@@ -8,8 +8,16 @@ case class BotConfig(
   apiKey: String
 )
 
+case class SmtpConfig(
+  host: String,
+  port: Int,
+  user: String,
+  pass: String,
+)
+
 case class Config(
   bot: BotConfig,
+  smtp: SmtpConfig,
 ) derives ConfigReader
 
 object Config {

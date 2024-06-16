@@ -1,6 +1,9 @@
 package com.pnp.domain
 
 enum DomainError:
-  case SmtpError(msg: String)
+  case SmtpCreateMessageError(msg: String)
+  case SmtpTransportConnectError(msg: String)
+  case SmtpSendMessageError(msg: String)
+
 
 

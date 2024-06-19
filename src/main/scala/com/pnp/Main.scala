@@ -17,7 +17,8 @@ object Main extends IOApp {
     } yield (config, log)
     resources.use { case (config, log) =>
         val smtp = Smtp(using config.smtp, log)
-        Telegram.run(using smtp, config.bot, log)
+        val imap = Imap(using config.imap, log)
+        Telegram.run(using smtp, imap, config.bot, log)
       }.as(ExitCode.Success)
   }
 }

@@ -15,9 +15,17 @@ case class SmtpConfig(
   pass: String,
 )
 
+case class ImapConfig(
+ host: String,
+ port: Int,
+ user: String,
+ pass: String,
+)
+
 case class Config(
   bot: BotConfig,
   smtp: SmtpConfig,
+  imap: ImapConfig,
 ) derives ConfigReader
 
 object Config {

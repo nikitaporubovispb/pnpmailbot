@@ -12,7 +12,14 @@ import logstage.LogIO
 import java.util.Properties
 
 class Smtp(using smtpConfig: SmtpConfig, log: LogIO[IO]) {
-  private val smtpProps: Properties = createSmtpProperties(smtpConfig)
+  private val smtpProps: Properties = {
+    val props = new Properties
+    props.put("mail.smtp.auth", "true")
+    props.put("mail.smtp.starttls.enable", "true")
+    props.put("mail.smtp.host", smtpConfig.host)
+    props.put("mail.smtp.port", smtpConfig.port)
+    props
+  }
 
   def sendMail(from: String, to: String, subject: String, content: String): IO[Either[DomainError, Unit]] = {
     val session = Session.getInstance(smtpProps)
@@ -56,15 +63,6 @@ class Smtp(using smtpConfig: SmtpConfig, log: LogIO[IO]) {
   private def sendMessage(message: Message, transport: Transport) : IO[Either[DomainError, Unit]] = IO.blocking {
     Either.catchNonFatal { transport.sendMessage(message, message.getAllRecipients) }
       .leftMap { th => SmtpSendMessageError(th.getMessage) }
-  }
-
-  private def createSmtpProperties(smtpConfig: SmtpConfig) = {
-    val props = new Properties
-    props.put("mail.smtp.auth", "true")
-    props.put("mail.smtp.starttls.enable", "true")
-    props.put("mail.smtp.host", smtpConfig.host)
-    props.put("mail.smtp.port", smtpConfig.port)
-    props
   }
 }
 

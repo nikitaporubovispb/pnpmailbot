@@ -1,11 +1,10 @@
 package com.pnp
 
 import cats.data.EitherT
-import cats.effect.IO
-import cats.effect.kernel.Resource
-import cats.syntax.all.*
+import cats.effect.{IO, Resource}
+import cats.syntax.all._
 import com.pnp.domain.*
-import com.pnp.domain.DomainError.{SmtpCreateMessageError, SmtpSendMessageError, SmtpTransportConnectError}
+import com.pnp.domain.DomainError.*
 import jakarta.mail.*
 import jakarta.mail.internet.*
 import logstage.LogIO
@@ -15,12 +14,12 @@ import java.util.Properties
 class Smtp(using smtpConfig: SmtpConfig, log: LogIO[IO]) {
   private val smtpProps: Properties = createSmtpProperties(smtpConfig)
 
-  def sendMail(from: String, to: String, subject: String, message: String): IO[Either[DomainError, Unit]] = {
+  def sendMail(from: String, to: String, subject: String, content: String): IO[Either[DomainError, Unit]] = {
+    val session = Session.getInstance(smtpProps)
     (for {
-      session <- EitherT.right[DomainError](IO(Session.getInstance(smtpProps)))
-      mail <- EitherT.fromEither[IO](createMessage(session, from, to, subject, message))
+      message <- EitherT.fromEither[IO](createMessage(session, from, to, subject, content))
       result <- EitherT(makeTransportResource(session).use { transport =>
-        sendMessage(mail, transport)
+        sendMessage(message, transport)
       })
     } yield result).value
   }
@@ -46,21 +45,16 @@ class Smtp(using smtpConfig: SmtpConfig, log: LogIO[IO]) {
     }.leftMap { th => SmtpCreateMessageError(th.getMessage) }
   }
 
-  private def makeTransportResource(session: Session): Resource[IO, Transport] =
-    Resource.make {
+  private def makeTransportResource(session: Session): Resource[IO, Transport] =  Resource.fromAutoCloseable {
       IO {
         val transport = session.getTransport("smtp")
         transport.connect(smtpConfig.user, smtpConfig.pass)
         transport
       }
-    } { transport =>
-      IO {
-        transport.close()
-      }.handleErrorWith(_ => IO.unit)
     }
 
-  private def sendMessage(mail: Message, transport: Transport) : IO[Either[DomainError, Unit]] = IO {
-    Either.catchNonFatal { transport.sendMessage(mail, mail.getAllRecipients) }
+  private def sendMessage(message: Message, transport: Transport) : IO[Either[DomainError, Unit]] = IO.blocking {
+    Either.catchNonFatal { transport.sendMessage(message, message.getAllRecipients) }
       .leftMap { th => SmtpSendMessageError(th.getMessage) }
   }
 

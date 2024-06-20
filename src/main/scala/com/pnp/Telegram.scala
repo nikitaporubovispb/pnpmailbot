@@ -40,15 +40,16 @@ object Telegram {
     for {
       chat <- Scenario.expect(command("fetch_mail").chat)
       _ <- Scenario.eval(LogIO[IO].info("Fetch unseen mail scenario started."))
-      _ <- Scenario.eval(chat.send("Start fetching..."))
-      mails <- Scenario.eval(imap.getUnseenMailInfos)
-      _ <- showMail(chat, mails)
+      _ <- Scenario.eval(chat.send("Start fetching INBOX..."))
+      mails <- Scenario.eval(imap.getUnseenMailInboxInfos)
+      _ <- if (mails.isEmpty) Scenario.eval(chat.send("No mails..."))
+      else Scenario.eval(chat.send(s"Unseen mail count: ${mails.size}")) >> showMail(chat, mails)
     } yield ()
 
   private def showMail[F[_] : TelegramClient](chat: Chat, messages: List[MailInfo]): Scenario[F, Unit] =
     for {
       _ <- messages match
-        case Nil => Scenario.eval(chat.send("No  more mails"))
+        case Nil => Scenario.eval(chat.send("No more mails"))
         case head :: tail => Scenario.eval(chat.send(s"Message from '${head.from}', to '${head.to}' with subject '${head.subject}'")) >> showMail(chat, tail)
     } yield ()
 }

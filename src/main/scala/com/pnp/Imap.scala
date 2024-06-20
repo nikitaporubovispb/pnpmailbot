@@ -9,7 +9,6 @@ import logstage.LogIO
 
 import java.util.Properties
 
-
 case class MailInfo(from: String, to: String, subject: String)
 
 class Imap(using imapConfig: ImapConfig, log: LogIO[IO]) {
@@ -27,23 +26,25 @@ class Imap(using imapConfig: ImapConfig, log: LogIO[IO]) {
     profile.add(FetchProfile.Item.FLAGS)
     profile
   }
-  
-  def getUnseenMailInfos: IO[List[MailInfo]] = {
-    makeStoreResource().use { store => IO {
-        val inbox = store.getFolder("INBOX")
-        inbox.open(Folder.READ_WRITE)
-        val search = inbox.search(FlagTerm(Flags(Flags.Flag.SEEN), false))
-        if (search.isEmpty) {
-          List.empty
-        } else {
-          inbox.fetch(search, fetchProfile)
-          search.map { message =>
-            MailInfo(
-              message.getFrom.map { address => address.asInstanceOf[InternetAddress].getAddress }.mkString(","),
-              message.getAllRecipients.map { address => address.asInstanceOf[InternetAddress].getAddress }.mkString(","),
-              message.getSubject,
-            )
-          }.toList
+
+  def getUnseenMailInboxInfos: IO[List[MailInfo]] = {
+    makeStoreResource().use { store =>
+      Resource.fromAutoCloseable(IO(store.getFolder("INBOX"))).use { inbox =>
+        IO {
+          inbox.open(Folder.READ_WRITE)
+          val search = inbox.search(FlagTerm(Flags(Flags.Flag.SEEN), false))
+          if (search.isEmpty) {
+            List.empty
+          } else {
+            inbox.fetch(search, fetchProfile)
+            search.map { message =>
+              MailInfo(
+                message.getFrom.map { address => address.asInstanceOf[InternetAddress].getAddress }.mkString(","),
+                message.getAllRecipients.map { address => address.asInstanceOf[InternetAddress].getAddress }.mkString(","),
+                message.getSubject,
+              )
+            }.toList
+          }
         }
       }
     }

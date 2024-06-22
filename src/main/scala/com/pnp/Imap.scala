@@ -9,7 +9,7 @@ import logstage.LogIO
 
 import java.util.Properties
 
-case class MailInfo(from: String, to: String, subject: String)
+case class MailInfo(id: Int, from: String, to: String, subject: String)
 
 class Imap(using imapConfig: ImapConfig, log: LogIO[IO]) {
   private val imapProperties: Properties = {
@@ -37,8 +37,9 @@ class Imap(using imapConfig: ImapConfig, log: LogIO[IO]) {
             List.empty
           } else {
             inbox.fetch(search, fetchProfile)
-            search.map { message =>
+            search.zipWithIndex.map { (message, index) =>
               MailInfo(
+                index,
                 message.getFrom.map { address => address.asInstanceOf[InternetAddress].getAddress }.mkString(","),
                 message.getAllRecipients.map { address => address.asInstanceOf[InternetAddress].getAddress }.mkString(","),
                 message.getSubject,

@@ -8,6 +8,7 @@ object Dependencies {
     val logstage = "1.2.8"
     val canoe = "0.6.0"
     val mail = "2.0.1"
+    val jsoup = "1.17.2"
   }
 
   val distage: Seq[ModuleID] = Seq(
@@ -19,7 +20,8 @@ object Dependencies {
     "org.typelevel"         %% "cats-effect"      % Versions.catsEffect,
     "org.typelevel"         %% "cats-core"        % Versions.cats,
     "com.github.pureconfig" %% "pureconfig-core"  % Versions.pureconfig,
-    "com.sun.mail"          % "jakarta.mail"      % Versions.mail
+    "com.sun.mail"          % "jakarta.mail"      % Versions.mail,
+    "org.jsoup"             % "jsoup"             % Versions.jsoup
   )
 
   val all: Seq[ModuleID] = misc ++ distage

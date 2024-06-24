@@ -41,6 +41,16 @@ class Smtp(using smtpConfig: SmtpConfig, log: LogIO[IO]) {
     } yield result).value
   }
 
+  def sendReply(to: String, content: String, message: Message): IO[Either[DomainError, Unit]] = {
+    val session = Session.getInstance(smtpProps)
+    (for {
+      message <- EitherT.fromEither[IO](createReplyMessage(session, to, content, message))
+      result <- EitherT(makeTransportResource(session).use { transport =>
+        sendMessage(message, transport)
+      })
+    } yield result).value
+  }
+
   private def createMessage(session: Session, from: String, to: String,
                             subject: String, content: String): Either[DomainError, Message] = {
     Either.catchNonFatal {
@@ -80,6 +90,27 @@ class Smtp(using smtpConfig: SmtpConfig, log: LogIO[IO]) {
       val multiPart = new MimeMultipart()
       multiPart.addBodyPart(contentBodyPart)
       multiPart.addBodyPart(messageBodyPart)
+
+      forward.setContent(multiPart)
+      forward.saveChanges()
+
+      forward
+    }.leftMap { th => SmtpCreateMessageError(th.getMessage) }
+  }
+
+  private def createReplyMessage(session: Session, to: String, content: String, message: Message): Either[DomainError, Message] = {
+    Either.catchNonFatal {
+      val forward = MimeMessage(session)
+      forward.setFrom(message.getRecipients(Message.RecipientType.TO)(0))
+      forward.setSubject("Re: " + message.getSubject)
+      forward.setRecipients(Message.RecipientType.TO,
+        InternetAddress.parse(to).asInstanceOf[Array[Address]])
+
+      val contentBodyPart = MimeBodyPart()
+      contentBodyPart.setText(content)
+
+      val multiPart = new MimeMultipart()
+      multiPart.addBodyPart(contentBodyPart)
 
       forward.setContent(multiPart)
       forward.saveChanges()

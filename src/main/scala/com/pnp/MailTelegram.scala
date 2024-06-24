@@ -13,9 +13,9 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]])
                   (using log: LogIO[IO], tc: TelegramClient[IO], imap: Imap, smtp: Smtp) {
   def stream: Stream[IO, Update] =
     Bot.polling[IO]
-      .follow(sendMail, fetchUnseen, showMailContent, forwardMail)
+      .follow(sendMail(), fetchUnseen(), showMailContent(), forwardMail(), replyMail())
 
-  private def sendMail[F[_]](using c: TelegramClient[IO], l: LogIO[IO], smtp: Smtp): Scenario[IO, Unit] =
+  private def sendMail[F[_]](): Scenario[IO, Unit] =
     for {
       chat <- Scenario.expect(command("send_mail").chat)
       _ <- Scenario.eval(LogIO[IO].info("Send mail scenario started."))
@@ -34,7 +34,7 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]])
       }
     } yield ()
 
-  private def fetchUnseen[F[_]](using c: TelegramClient[IO], l: LogIO[IO], imap: Imap): Scenario[IO, Unit] =
+  private def fetchUnseen[F[_]](): Scenario[IO, Unit] =
     for {
       chat <- Scenario.expect(command("get_mails").chat)
       _ <- Scenario.eval(LogIO[IO].info("Fetch unseen mail scenario started."))
@@ -47,20 +47,20 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]])
           >> showMailInfos(chat, mails)
     } yield ()
 
-  private def showMailContent[F[_]](using c: TelegramClient[IO], l: LogIO[IO], imap: Imap): Scenario[IO, Unit] =
+  private def showMailContent[F[_]](): Scenario[IO, Unit] =
     for {
       textMessage <- Scenario.expect(command("show_mail"))
       _ <- Scenario.eval(LogIO[IO].info("show_mail"))
       mailOption <- Scenario.eval(getMail(chatsData, textMessage.chat.id.toString, getMailIndex(textMessage.text)))
       _ <- mailOption match {
         case Some(mailInfo) =>
-          Scenario.eval(addLastMessage(chatsData, textMessage.chat.id.toString, mailInfo.message)) 
+          Scenario.eval(addLastMessage(chatsData, textMessage.chat.id.toString, mailInfo.message))
             >> sendMailContent(textMessage.chat, mailInfo.content.mkString("\n=====\n"))
         case None => Scenario.eval(textMessage.chat.send("Mail not found"))
       }
     } yield ()
 
-  private def forwardMail[F[_]](using c: TelegramClient[IO], l: LogIO[IO], imap: Imap): Scenario[IO, Unit] =
+  private def forwardMail[F[_]](): Scenario[IO, Unit] =
     for {
       chat <- Scenario.expect(command("forward").chat)
       _ <- Scenario.eval(LogIO[IO].info("forward"))
@@ -70,6 +70,22 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]])
       text <- Scenario.expect(text)
       lastMessage <- Scenario.eval(getLastMessage(chatsData, chat.id.toString))
       result <- Scenario.eval(smtp.sendForward(to, text, lastMessage.get))
+      _ <- result match {
+        case Left (value) => Scenario.eval (chat.send (s"Error =( $value"))
+        case Right (_) => Scenario.eval (chat.send ("Successful sent!!!"))
+      }
+    } yield ()
+
+  private def replyMail[F[_]](): Scenario[IO, Unit] =
+    for {
+      chat <- Scenario.expect(command("reply").chat)
+      _ <- Scenario.eval(LogIO[IO].info("reply"))
+      _ <- Scenario.eval(chat.send("To"))
+      to <- Scenario.expect(text)
+      _ <- Scenario.eval(chat.send("Text"))
+      text <- Scenario.expect(text)
+      lastMessage <- Scenario.eval(getLastMessage(chatsData, chat.id.toString))
+      result <- Scenario.eval(smtp.sendReply(to, text, lastMessage.get))
       _ <- result match {
         case Left (value) => Scenario.eval (chat.send (s"Error =( $value"))
         case Right (_) => Scenario.eval (chat.send ("Successful sent!!!"))

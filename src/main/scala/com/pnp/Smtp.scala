@@ -31,6 +31,16 @@ class Smtp(using smtpConfig: SmtpConfig, log: LogIO[IO]) {
     } yield result).value
   }
 
+  def sendForward(to: String, content: String, message: Message): IO[Either[DomainError, Unit]] = {
+    val session = Session.getInstance(smtpProps)
+    (for {
+      message <- EitherT.fromEither[IO](createForwardMessage(session, to, content, message))
+      result <- EitherT(makeTransportResource(session).use { transport =>
+        sendMessage(message, transport)
+      })
+    } yield result).value
+  }
+
   private def createMessage(session: Session, from: String, to: String,
                             subject: String, content: String): Either[DomainError, Message] = {
     Either.catchNonFatal {
@@ -40,15 +50,41 @@ class Smtp(using smtpConfig: SmtpConfig, log: LogIO[IO]) {
       message.setRecipients(Message.RecipientType.TO,
         InternetAddress.parse(to).asInstanceOf[Array[Address]])
 
-      val multiPart = new MimeMultipart()
       val messageBodyPart = MimeBodyPart()
       messageBodyPart.setText(content)
+      
+      val multiPart = new MimeMultipart()
       multiPart.addBodyPart(messageBodyPart)
 
       message.setContent(multiPart)
       message.saveChanges()
 
       message
+    }.leftMap { th => SmtpCreateMessageError(th.getMessage) }
+  }
+
+  private def createForwardMessage(session: Session, to: String, content: String, message: Message): Either[DomainError, Message] = {
+    Either.catchNonFatal {
+      val forward = MimeMessage(session)
+      forward.setFrom(message.getRecipients(Message.RecipientType.TO)(0))
+      forward.setSubject("Fwd: " + message.getSubject)
+      forward.setRecipients(Message.RecipientType.TO,
+        InternetAddress.parse(to).asInstanceOf[Array[Address]])
+
+      val contentBodyPart = MimeBodyPart()
+      contentBodyPart.setText(content)
+
+      val messageBodyPart = MimeBodyPart()
+      messageBodyPart.setContent(message, "message/rfc822")
+
+      val multiPart = new MimeMultipart()
+      multiPart.addBodyPart(contentBodyPart)
+      multiPart.addBodyPart(messageBodyPart)
+
+      forward.setContent(multiPart)
+      forward.saveChanges()
+
+      forward
     }.leftMap { th => SmtpCreateMessageError(th.getMessage) }
   }
 

@@ -1,8 +1,9 @@
 package com.pnp.domain
 
-enum DomainError:
-  case SmtpCreateMessageError(msg: String)
-  case SmtpSendMessageError(msg: String)
+enum DomainError(msg: String):
+  case SmtpCreateMessageError(msg: String) extends DomainError(msg)
+  case SmtpSendMessageError(msg: String) extends DomainError(msg)
+  case TelegramProcessError(msg: String) extends DomainError(msg)
 
 
 

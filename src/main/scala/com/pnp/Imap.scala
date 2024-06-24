@@ -3,7 +3,7 @@ package com.pnp
 import cats.effect.IO
 import cats.effect.kernel.Resource
 import com.pnp.Imap.*
-import com.pnp.domain.Mail.{MailContent, MailInfo}
+import com.pnp.domain.*
 import jakarta.mail.search.FlagTerm
 import jakarta.mail.*
 import jakarta.mail.internet.*
@@ -29,6 +29,7 @@ class Imap(using imapConfig: ImapConfig, log: LogIO[IO]) {
             search.zipWithIndex.map { (message, index) =>
               MailInfo(
                 index,
+                message,
                 parseContent(message).map(content => getCleanedContent(content.contentType, content.content)),
                 message.getFrom.map { address => address.asInstanceOf[InternetAddress].getAddress }.mkString(","),
                 message.getAllRecipients.map { address => address.asInstanceOf[InternetAddress].getAddress }.mkString(","),
@@ -56,13 +57,6 @@ object Imap {
     props.put("mail.debug", "false")
     props.put("mail.store.protocol", "imaps")
     props
-  }
-
-  private val fetchInfoProfile: FetchProfile = {
-    val profile = new FetchProfile
-    profile.add(FetchProfile.Item.ENVELOPE)
-    profile.add(FetchProfile.Item.FLAGS)
-    profile
   }
 
   private val fetchContentProfile: FetchProfile = {

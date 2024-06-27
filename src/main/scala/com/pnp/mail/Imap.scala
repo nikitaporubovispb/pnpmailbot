@@ -1,19 +1,19 @@
-package com.pnp
+package com.pnp.mail
 
 import cats.effect.IO
 import cats.effect.kernel.Resource
-import com.pnp.Imap.*
+import Imap.*
 import com.pnp.domain.*
-import jakarta.mail.search.FlagTerm
 import jakarta.mail.*
 import jakarta.mail.internet.*
+import jakarta.mail.search.FlagTerm
 import logstage.LogIO
+import org.jsoup.*
+import org.jsoup.safety.*
 
 import java.io.InputStream
 import java.util.{Objects, Properties}
 import scala.annotation.tailrec
-import org.jsoup.*
-import org.jsoup.safety.*
 
 class Imap(using imapConfig: ImapConfig, log: LogIO[IO]) {
   def getUnseenMailInboxInfos: IO[List[MailInfo]] = {

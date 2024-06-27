@@ -1,16 +1,18 @@
-package com.pnp
+package com.pnp.telegram
 
 import canoe.api.*
 import canoe.models.{Chat, Update}
-import canoe.syntax.*
+import canoe.syntax.{text, *}
 import cats.effect.{IO, Ref}
 import com.pnp.domain.{ChatData, MailInfo}
+import com.pnp.mail.{Imap, Smtp}
+import com.pnp.service.InteractionService
 import fs2.Stream
 import jakarta.mail.Message
 import logstage.LogIO
 
 class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]])
-                  (using log: LogIO[IO], tc: TelegramClient[IO], imap: Imap, smtp: Smtp) {
+                  (using log: LogIO[IO], tc: TelegramClient[IO], imap: Imap, smtp: Smtp, interaction: InteractionService) {
   def stream: Stream[IO, Update] =
     Bot.polling[IO]
       .follow(sendMail(), fetchUnseen(), showMailContent(), forwardMail(), replyMail())
@@ -19,6 +21,7 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]])
     for {
       chat <- Scenario.expect(command("send_mail").chat)
       _ <- Scenario.eval(LogIO[IO].info("Send mail scenario started."))
+      _ <- checkUser(chat)
       _ <- Scenario.eval(chat.send("from?"))
       from <- Scenario.expect(text)
       _ <- Scenario.eval(chat.send("to?"))
@@ -37,6 +40,7 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]])
   private def fetchUnseen[F[_]](): Scenario[IO, Unit] =
     for {
       chat <- Scenario.expect(command("get_mails").chat)
+      _ <- checkUser(chat)
       _ <- Scenario.eval(LogIO[IO].info("Fetch unseen mail scenario started."))
       _ <- Scenario.eval(chat.send("Start fetching INBOX..."))
       mails <- Scenario.eval(imap.getUnseenMailInboxInfos)
@@ -90,6 +94,11 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]])
         case Left (value) => Scenario.eval (chat.send (s"Error =( $value"))
         case Right (_) => Scenario.eval (chat.send ("Successful sent!!!"))
       }
+    } yield ()
+
+  private def checkUser[F[_] : TelegramClient](chat: Chat): Scenario[IO, Unit] =
+    for {
+      isReg <- Scenario.eval(interaction.register(chat.id.toString))
     } yield ()
 
   private def showMailInfos[F[_] : TelegramClient](chat: Chat, messages: List[MailInfo]): Scenario[F, Unit] =

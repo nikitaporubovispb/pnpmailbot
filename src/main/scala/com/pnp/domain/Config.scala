@@ -1,8 +1,9 @@
-package com.pnp
+package com.pnp.domain
 
 import cats.effect.IO
-import pureconfig.{ConfigReader, ConfigSource}
+import com.pnp.*
 import pureconfig.generic.derivation.default.*
+import pureconfig.{ConfigReader, ConfigSource}
 
 case class BotConfig(
   apiKey: String
@@ -22,10 +23,19 @@ case class ImapConfig(
  pass: String,
 )
 
+case class DbConfig(
+ host: String,
+ port: Int,
+ database: String,
+ user: String,
+ password: String
+)
+
 case class Config(
   bot: BotConfig,
   smtp: SmtpConfig,
   imap: ImapConfig,
+  database: DbConfig,
 ) derives ConfigReader
 
 object Config {

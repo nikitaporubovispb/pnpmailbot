@@ -1,8 +1,8 @@
-package com.pnp
+package com.pnp.mail
 
 import cats.data.EitherT
 import cats.effect.{IO, Resource}
-import cats.syntax.all._
+import cats.syntax.all.*
 import com.pnp.domain.*
 import com.pnp.domain.DomainError.*
 import jakarta.mail.*

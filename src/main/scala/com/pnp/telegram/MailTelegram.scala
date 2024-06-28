@@ -16,7 +16,15 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]], config: Config)
                   (using log: LogIO[IO], tc: TelegramClient[IO], imap: Imap, smtp: Smtp, interaction: InteractionService) {
   def stream: Stream[IO, Update] =
     Bot.polling[IO]
-      .follow(sendMail(), fetchUnseen(), showMailContent(), forwardMail(), replyMail())
+      .follow(start(), sendMail(), fetchUnseen(), showMailContent(), forwardMail(), replyMail())
+
+  private def start(): Scenario[IO, Unit] =
+    for {
+      chat <- Scenario.expect(command("start").chat)
+      _ <- Scenario.eval(LogIO[IO].info("Start  scenario started."))
+      _ <- Scenario.eval(chat.send("/get_mails - fetch unseen mails"))
+      _ <- Scenario.eval(chat.send("/send_mail - send mail"))
+    } yield ()
 
   private def sendMail(): Scenario[IO, Unit] =
     for {

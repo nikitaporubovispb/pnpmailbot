@@ -2,26 +2,27 @@ package com.pnp.telegram
 
 import canoe.api.*
 import canoe.models.{Chat, Update}
-import canoe.syntax.{text, *}
+import canoe.syntax.*
 import cats.effect.{IO, Ref}
-import com.pnp.domain.{ChatData, MailInfo}
+import cats.syntax.all.*
+import com.pnp.domain.{ConfigType, *}
 import com.pnp.mail.{Imap, Smtp}
 import com.pnp.service.InteractionService
 import fs2.Stream
 import jakarta.mail.Message
 import logstage.LogIO
 
-class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]])
+class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]], config: Config)
                   (using log: LogIO[IO], tc: TelegramClient[IO], imap: Imap, smtp: Smtp, interaction: InteractionService) {
   def stream: Stream[IO, Update] =
     Bot.polling[IO]
       .follow(sendMail(), fetchUnseen(), showMailContent(), forwardMail(), replyMail())
 
-  private def sendMail[F[_]](): Scenario[IO, Unit] =
+  private def sendMail(): Scenario[IO, Unit] =
     for {
       chat <- Scenario.expect(command("send_mail").chat)
       _ <- Scenario.eval(LogIO[IO].info("Send mail scenario started."))
-      _ <- checkUser(chat)
+      user <- getUser(chat)
       _ <- Scenario.eval(chat.send("from?"))
       from <- Scenario.expect(text)
       _ <- Scenario.eval(chat.send("to?"))
@@ -30,20 +31,22 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]])
       subject <- Scenario.expect(text)
       _ <- Scenario.eval(chat.send("text?"))
       content <- Scenario.expect(text)
-      result <- Scenario.eval(smtp.sendMail(from, to, subject, content))
+      smtpConfig <- Scenario.eval(getSmtpConfig(user))
+      result <- Scenario.eval(smtp.sendMail(smtpConfig, from, to, subject, content))
       _ <- result match {
         case Left(value) => Scenario.eval(chat.send(s"Error =( $value"))
         case Right(_) => Scenario.eval(chat.send("Successful sent!!!"))
       }
     } yield ()
 
-  private def fetchUnseen[F[_]](): Scenario[IO, Unit] =
+  private def fetchUnseen(): Scenario[IO, Unit] =
     for {
       chat <- Scenario.expect(command("get_mails").chat)
-      _ <- checkUser(chat)
+      user <- getUser(chat)
       _ <- Scenario.eval(LogIO[IO].info("Fetch unseen mail scenario started."))
       _ <- Scenario.eval(chat.send("Start fetching INBOX..."))
-      mails <- Scenario.eval(imap.getUnseenMailInboxInfos)
+      imapConfig: ImapConfig <- Scenario.eval(getImapConfig(user))
+      mails <- Scenario.eval(imap.getUnseenMailInboxInfos(imapConfig))
       _ <- Scenario.eval(addMails(chatsData, chat.id.toString, mails))
       _ <-
         if (mails.isEmpty) Scenario.eval(chat.send("No mails..."))
@@ -51,7 +54,7 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]])
           >> showMailInfos(chat, mails)
     } yield ()
 
-  private def showMailContent[F[_]](): Scenario[IO, Unit] =
+  private def showMailContent(): Scenario[IO, Unit] =
     for {
       textMessage <- Scenario.expect(command("show_mail"))
       _ <- Scenario.eval(LogIO[IO].info("show_mail"))
@@ -64,7 +67,7 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]])
       }
     } yield ()
 
-  private def forwardMail[F[_]](): Scenario[IO, Unit] =
+  private def forwardMail(): Scenario[IO, Unit] =
     for {
       chat <- Scenario.expect(command("forward").chat)
       _ <- Scenario.eval(LogIO[IO].info("forward"))
@@ -73,14 +76,16 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]])
       _ <- Scenario.eval(chat.send("Text"))
       text <- Scenario.expect(text)
       lastMessage <- Scenario.eval(getLastMessage(chatsData, chat.id.toString))
-      result <- Scenario.eval(smtp.sendForward(to, text, lastMessage.get))
+      user <- getUser(chat)
+      smtpConfig <- Scenario.eval(getSmtpConfig(user))
+      result <- Scenario.eval(smtp.sendForward(smtpConfig, to, text, lastMessage.get))
       _ <- result match {
         case Left (value) => Scenario.eval (chat.send (s"Error =( $value"))
         case Right (_) => Scenario.eval (chat.send ("Successful sent!!!"))
       }
     } yield ()
 
-  private def replyMail[F[_]](): Scenario[IO, Unit] =
+  private def replyMail(): Scenario[IO, Unit] =
     for {
       chat <- Scenario.expect(command("reply").chat)
       _ <- Scenario.eval(LogIO[IO].info("reply"))
@@ -89,17 +94,67 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]])
       _ <- Scenario.eval(chat.send("Text"))
       text <- Scenario.expect(text)
       lastMessage <- Scenario.eval(getLastMessage(chatsData, chat.id.toString))
-      result <- Scenario.eval(smtp.sendReply(to, text, lastMessage.get))
+      user <- getUser(chat)
+      smtpConfig <- Scenario.eval(getSmtpConfig(user))
+      result <- Scenario.eval(smtp.sendReply(smtpConfig, to, text, lastMessage.get))
       _ <- result match {
         case Left (value) => Scenario.eval (chat.send (s"Error =( $value"))
         case Right (_) => Scenario.eval (chat.send ("Successful sent!!!"))
       }
     } yield ()
 
-  private def checkUser[F[_] : TelegramClient](chat: Chat): Scenario[IO, Unit] =
+  private def configMail(): Scenario[IO, Unit] =
     for {
-      isReg <- Scenario.eval(interaction.register(chat.id.toString))
+      chat <- Scenario.expect(command("config").chat)
+      user <- Scenario.eval(interaction.getUser(chat.id.toString))
+      _    <- configMail(chat, user.get)
     } yield ()
+
+  private def configMail(chat: Chat, user: DbUser): Scenario[IO, Unit] =
+    for {
+      _ <- Scenario.eval(LogIO[IO].info("config"))
+      _ <- Scenario.eval(chat.send("Imap config:"))
+      _ <- Scenario.eval(chat.send("Imap host?"))
+      imapHost <- Scenario.expect(text)
+      _ <- Scenario.eval(chat.send("Imap port?"))
+      imapPort <- Scenario.expect(text)
+      _ <- Scenario.eval(chat.send("Imap user?"))
+      imapUser <- Scenario.expect(text)
+      _ <- Scenario.eval(chat.send("Imap pass?"))
+      imapPass <- Scenario.expect(text)
+      _ <- Scenario.eval(chat.send("Smtp config:"))
+      _ <- Scenario.eval(chat.send("Smtp host?"))
+      smtpHost <- Scenario.expect(text)
+      _ <- Scenario.eval(chat.send("Smtp port?"))
+      smtpPort <- Scenario.expect(text)
+      _ <- Scenario.eval(chat.send("Smtp user?"))
+      smtpUser <- Scenario.expect(text)
+      _ <- Scenario.eval(chat.send("Smtp pass?"))
+      smtpPass <- Scenario.expect(text)
+      _ <- Scenario.eval(interaction.addMailConfig(DbMailConfig(-1L, user.id, ConfigType.Imap.id, imapHost, imapPort.toInt, imapUser, imapPass)))
+      _ <- Scenario.eval(interaction.addMailConfig(DbMailConfig(-1L, user.id, ConfigType.Smtp.id, smtpHost, smtpPort.toInt, smtpUser, smtpPass)))
+    } yield ()
+
+  private def getUser(chat: Chat): Scenario[IO, Option[DbUser]] =
+    for {
+      userOpt <- Scenario.eval(interaction.getUser(chat.id.toString))
+      user    <- userOpt match
+        case None => addNewUser(chat)
+        case u@Some(user) => Scenario.pure(u)
+    } yield user
+
+  private def addNewUser(chat: Chat): Scenario[IO, Option[DbUser]] =
+    for {
+      _ <- Scenario.eval(chat.send("New user!!!"))
+      _ <- Scenario.eval(chat.send("Should you use shared mail config(type anything/'false') or own(type 'true')?"))
+      isExternalConfigText <- Scenario.expect(text)
+      isExternalConfig = Either.catchNonFatal { isExternalConfigText.toBoolean }.fold(th => false, b => b)
+      _ <- Scenario.eval(interaction.register(chat.id.toString, isExternalConfig))
+      userOpt <- Scenario.eval(interaction.getUser(chat.id.toString))
+      - <- userOpt match
+        case Some(user) if isExternalConfig => configMail(chat, user)
+        case _ => Scenario.done
+    } yield userOpt
 
   private def showMailInfos[F[_] : TelegramClient](chat: Chat, messages: List[MailInfo]): Scenario[F, Unit] =
     for {
@@ -147,5 +202,19 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]])
   private def getMailIndex(text: String): Int = {
     val lastIndex = text.lastIndexOf('_')
     text.substring(lastIndex + 1).toInt
+  }
+
+  private def getSmtpConfig(userOpt: Option[DbUser]): IO[SmtpConfig] = {
+      userOpt match
+        case Some(DbUser(userId, _, _)) => interaction.getMailConfig(userId, ConfigType.Smtp)
+          .map { dbConfigOpt => dbConfigOpt.fold(config.smtp)(dbSmtp => SmtpConfig(dbSmtp.host, dbSmtp.port, dbSmtp.user, dbSmtp.password)) }
+        case None => IO(config.smtp)
+    }
+
+  private def getImapConfig(userOpt: Option[DbUser]): IO[ImapConfig] = {
+    userOpt match
+      case Some(DbUser(userId, _, _)) => interaction.getMailConfig(userId, ConfigType.Imap)
+        .map { dbConfigOpt => dbConfigOpt.fold(config.imap)(dbImap => ImapConfig(dbImap.host, dbImap.port, dbImap.user, dbImap.password)) }
+      case None => IO(config.imap)
   }
 }

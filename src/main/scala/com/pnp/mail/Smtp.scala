@@ -11,41 +11,41 @@ import logstage.LogIO
 
 import java.util.Properties
 
-class Smtp(using smtpConfig: SmtpConfig, log: LogIO[IO]) {
-  private val smtpProps: Properties = {
+class Smtp(log: LogIO[IO]) {
+  private def smtpProps(host: String, port: Int): Properties = {
     val props = new Properties
     props.put("mail.smtp.auth", "true")
     props.put("mail.smtp.starttls.enable", "true")
-    props.put("mail.smtp.host", smtpConfig.host)
-    props.put("mail.smtp.port", smtpConfig.port)
+    props.put("mail.smtp.host", host)
+    props.put("mail.smtp.port", port)
     props
   }
 
-  def sendMail(from: String, to: String, subject: String, content: String): IO[Either[DomainError, Unit]] = {
-    val session = Session.getInstance(smtpProps)
+  def sendMail(smtpConfig: SmtpConfig, from: String, to: String, subject: String, content: String): IO[Either[DomainError, Unit]] = {
+    val session = Session.getInstance(smtpProps(smtpConfig.host, smtpConfig.port))
     (for {
       message <- EitherT.fromEither[IO](createMessage(session, from, to, subject, content))
-      result <- EitherT(makeTransportResource(session).use { transport =>
+      result <- EitherT(makeTransportResource(session, smtpConfig.user, smtpConfig.pass).use { transport =>
         sendMessage(message, transport)
       })
     } yield result).value
   }
 
-  def sendForward(to: String, content: String, message: Message): IO[Either[DomainError, Unit]] = {
-    val session = Session.getInstance(smtpProps)
+  def sendForward(smtpConfig: SmtpConfig, to: String, content: String, message: Message): IO[Either[DomainError, Unit]] = {
+    val session = Session.getInstance(smtpProps(smtpConfig.host, smtpConfig.port))
     (for {
       message <- EitherT.fromEither[IO](createForwardMessage(session, to, content, message))
-      result <- EitherT(makeTransportResource(session).use { transport =>
+      result <- EitherT(makeTransportResource(session, smtpConfig.user, smtpConfig.pass).use { transport =>
         sendMessage(message, transport)
       })
     } yield result).value
   }
 
-  def sendReply(to: String, content: String, message: Message): IO[Either[DomainError, Unit]] = {
-    val session = Session.getInstance(smtpProps)
+  def sendReply(smtpConfig: SmtpConfig, to: String, content: String, message: Message): IO[Either[DomainError, Unit]] = {
+    val session = Session.getInstance(smtpProps(smtpConfig.host, smtpConfig.port))
     (for {
       message <- EitherT.fromEither[IO](createReplyMessage(session, to, content, message))
-      result <- EitherT(makeTransportResource(session).use { transport =>
+      result <- EitherT(makeTransportResource(session, smtpConfig.user, smtpConfig.pass).use { transport =>
         sendMessage(message, transport)
       })
     } yield result).value
@@ -119,10 +119,10 @@ class Smtp(using smtpConfig: SmtpConfig, log: LogIO[IO]) {
     }.leftMap { th => SmtpCreateMessageError(th.getMessage) }
   }
 
-  private def makeTransportResource(session: Session): Resource[IO, Transport] =  Resource.fromAutoCloseable {
+  private def makeTransportResource(session: Session, user: String, pass:String): Resource[IO, Transport] =  Resource.fromAutoCloseable {
       IO {
         val transport = session.getTransport("smtp")
-        transport.connect(smtpConfig.user, smtpConfig.pass)
+        transport.connect(user, pass)
         transport
       }
     }

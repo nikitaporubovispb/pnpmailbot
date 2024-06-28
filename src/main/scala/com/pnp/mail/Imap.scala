@@ -15,9 +15,9 @@ import java.io.InputStream
 import java.util.{Objects, Properties}
 import scala.annotation.tailrec
 
-class Imap(using imapConfig: ImapConfig, log: LogIO[IO]) {
-  def getUnseenMailInboxInfos: IO[List[MailInfo]] = {
-    makeStoreResource().use { store =>
+class Imap(log: LogIO[IO]) {
+  def getUnseenMailInboxInfos(imapConfig: ImapConfig): IO[List[MailInfo]] = {
+    makeStoreResource(imapConfig).use { store =>
       Resource.fromAutoCloseable(IO(store.getFolder("INBOX"))).use { inbox =>
         IO {
           inbox.open(Folder.READ_ONLY)
@@ -42,7 +42,7 @@ class Imap(using imapConfig: ImapConfig, log: LogIO[IO]) {
     }
   }
 
-  private def makeStoreResource(): Resource[IO, Store] = Resource.fromAutoCloseable {
+  private def makeStoreResource(imapConfig: ImapConfig): Resource[IO, Store] = Resource.fromAutoCloseable {
     IO {
       val store = Session.getInstance(imapProperties).getStore
       store.connect(imapConfig.host, imapConfig.port, imapConfig.user, imapConfig.pass)

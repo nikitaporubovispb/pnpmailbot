@@ -1,9 +1,10 @@
 package com.pnp
 
 import cats.effect.{ExitCode, IO, IOApp, Resource}
-import com.pnp.domain.Config
+import com.pnp.dao.{MailConfigDao, UserDao}
+import com.pnp.domain.{Config, DbMailConfig}
 import com.pnp.mail.{Imap, Smtp}
-import com.pnp.service.{InteractionService, UserService}
+import com.pnp.service.InteractionService
 import com.pnp.telegram.Telegram
 import org.typelevel.otel4s.trace.Tracer
 import izumi.logstage.api.IzLogger
@@ -18,7 +19,7 @@ object Main extends IOApp {
     LogIO.fromLogger[IO](logger)
   }
 
-  def createSession(using config: Config): Resource[IO, Session[IO]] =
+  private def createSession(using config: Config): Resource[IO, Session[IO]] =
     Session.single(
       host = config.database.host,
       port = config.database.port,
@@ -32,13 +33,14 @@ object Main extends IOApp {
       config      <- Config.load.toResource
       log         <- createLogger.toResource
       session     <- createSession(using config)
-      userService <- UserService.make(using session, log).toResource
-      interaction <- InteractionService.from(userService).toResource
+      userDao <- UserDao.make(using session, log).toResource
+      mailConfigDao <- MailConfigDao.make(using session, log).toResource
+      interaction <- InteractionService.from(userDao, mailConfigDao).toResource
     } yield (config, log, interaction)
     resources.use { case (config, log, interaction) =>
-        val smtp = Smtp(using config.smtp, log)
-        val imap = Imap(using config.imap, log)
-        Telegram.run(using smtp, imap, config.bot, log, interaction)
+        val smtp = Smtp(log)
+        val imap = Imap(log)
+        Telegram.run(using smtp, imap, config, log, interaction)
       }.as(ExitCode.Success)
   }
 }

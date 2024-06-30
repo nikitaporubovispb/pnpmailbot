@@ -181,30 +181,33 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]], config: Config)
         else Scenario.eval(chat.send(content.substring(0, 4096))) >> sendMailContent(chat, content.substring(4096))
     } yield ()
 
-  private def addMails(ref: Ref[IO, Map[String, ChatData]], chatId: String, mailInfos: List[MailInfo]): IO[Unit] = {
+  private def updateField[A](ref: Ref[IO, Map[String, ChatData]], chatId: String, updateFunc: ChatData => ChatData): IO[Unit] = {
     ref.update { chatMap =>
-      val chatData = chatMap.getOrElse(chatId, ChatData(null, null))
-      chatMap.updated(chatId, chatData.copy(fetchedMailInfos = mailInfos))
+      val chatData = chatMap.getOrElse(chatId, ChatData(Nil, None))
+      chatMap.updated(chatId, updateFunc(chatData))
     }
   }
 
+  private def addMails(ref: Ref[IO, Map[String, ChatData]], chatId: String, mailInfos: List[MailInfo]): IO[Unit] = {
+    updateField(ref, chatId, chatData => chatData.copy(fetchedMailInfos = mailInfos))
+  }
+
   private def addLastMessage(ref: Ref[IO, Map[String, ChatData]], chatId: String, message: Message): IO[Unit] = {
-    ref.update { chatMap =>
-      val chatData = chatMap.getOrElse(chatId, ChatData(null, null))
-      chatMap.updated(chatId, chatData.copy(lastMessage = Some(message)))
+    updateField(ref, chatId, chatData => chatData.copy(lastMessage = Some(message)))
+  }
+
+  private def getField[A](ref: Ref[IO, Map[String, ChatData]], chatId: String, extractField: ChatData => Option[A]): IO[Option[A]] = {
+    ref.get.map { chatMap =>
+      chatMap.get(chatId).flatMap(extractField)
     }
   }
 
   private def getMail(ref: Ref[IO, Map[String, ChatData]], chatId: String, mailIndex: Int): IO[Option[MailInfo]] = {
-    ref.get.map { chatMap =>
-      chatMap.get(chatId).flatMap(_.fetchedMailInfos.lift(mailIndex))
-    }
+    getField(ref, chatId, _.fetchedMailInfos.lift(mailIndex))
   }
 
   private def getLastMessage(ref: Ref[IO, Map[String, ChatData]], chatId: String): IO[Option[Message]] = {
-    ref.get.map { chatMap =>
-      chatMap.get(chatId).flatMap(_.lastMessage)
-    }
+    getField(ref, chatId, _.lastMessage)
   }
 
   private def getMailIndex(text: String): Int = {

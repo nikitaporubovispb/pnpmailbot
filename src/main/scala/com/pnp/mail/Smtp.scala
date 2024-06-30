@@ -21,38 +21,26 @@ class Smtp(log: LogIO[IO]) {
     props
   }
 
-  def sendMail(smtpConfig: SmtpConfig, from: String, to: String, subject: String, content: String): IO[Either[DomainError, Unit]] = {
+  private def send(smtpConfig: SmtpConfig)(messageCreator: Session => Either[DomainError, Message]) : IO[Either[DomainError, Unit]] = {
     val session = Session.getInstance(smtpProps(smtpConfig.host, smtpConfig.port))
     (for {
-      message <- EitherT.fromEither[IO](createMessage(session, from, to, subject, content))
+      message <- EitherT.fromEither[IO](messageCreator(session))
       result <- EitherT(makeTransportResource(session, smtpConfig.user, smtpConfig.pass).use { transport =>
         sendMessage(message, transport)
       })
     } yield result).value
   }
 
-  def sendForward(smtpConfig: SmtpConfig, to: String, content: String, message: Message): IO[Either[DomainError, Unit]] = {
-    val session = Session.getInstance(smtpProps(smtpConfig.host, smtpConfig.port))
-    (for {
-      message <- EitherT.fromEither[IO](createForwardMessage(session, to, content, message))
-      result <- EitherT(makeTransportResource(session, smtpConfig.user, smtpConfig.pass).use { transport =>
-        sendMessage(message, transport)
-      })
-    } yield result).value
-  }
+  def sendMail(smtpConfig: SmtpConfig, from: String, to: String, subject: String, content: String): IO[Either[DomainError, Unit]] =
+    send(smtpConfig){ createMessage(_, from, to, subject, content) }
 
-  def sendReply(smtpConfig: SmtpConfig, to: String, content: String, message: Message): IO[Either[DomainError, Unit]] = {
-    val session = Session.getInstance(smtpProps(smtpConfig.host, smtpConfig.port))
-    (for {
-      message <- EitherT.fromEither[IO](createReplyMessage(session, to, content, message))
-      result <- EitherT(makeTransportResource(session, smtpConfig.user, smtpConfig.pass).use { transport =>
-        sendMessage(message, transport)
-      })
-    } yield result).value
-  }
+  def sendForward(smtpConfig: SmtpConfig, to: String, content: String, message: Message): IO[Either[DomainError, Unit]] =
+    send(smtpConfig){ createForwardMessage(_, to, content, message) }
 
-  private def createMessage(session: Session, from: String, to: String,
-                            subject: String, content: String): Either[DomainError, Message] = {
+  def sendReply(smtpConfig: SmtpConfig, to: String, content: String, message: Message): IO[Either[DomainError, Unit]] =
+    send(smtpConfig){ createReplyMessage(_, to, content, message) }
+
+  private def createMessage(session: Session, from: String, to: String, subject: String, content: String): Either[DomainError, Message] = {
     Either.catchNonFatal {
       val message = MimeMessage(session)
       message.setFrom(InternetAddress(from))

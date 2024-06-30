@@ -1,8 +1,7 @@
 package com.pnp.dao
 
 import cats.effect.IO
-import com.pnp.dao.{UserDao, UserDaoImpl}
-import com.pnp.domain.{DbMailConfig, DbUser}
+import com.pnp.domain.DbMailConfig
 import logstage.LogIO
 import skunk.*
 import skunk.codec.all.*

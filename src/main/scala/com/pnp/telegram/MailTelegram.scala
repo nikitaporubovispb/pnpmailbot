@@ -42,8 +42,8 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]], config: Config)
       smtpConfig <- Scenario.eval(getSmtpConfig(user))
       result <- Scenario.eval(smtp.sendMail(smtpConfig, from, to, subject, content))
       _ <- result match {
-        case Left(value) => Scenario.eval(chat.send(s"Error =( $value"))
         case Right(_) => Scenario.eval(chat.send("Successful sent!!!"))
+        case Left(error) => handleError(chat, error.msg)
       }
     } yield ()
 
@@ -54,12 +54,17 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]], config: Config)
       _ <- Scenario.eval(LogIO[IO].info("Fetch unseen mail scenario started."))
       _ <- Scenario.eval(chat.send("Start fetching INBOX..."))
       imapConfig: ImapConfig <- Scenario.eval(getImapConfig(user))
-      mails <- Scenario.eval(imap.getUnseenMailInboxInfos(imapConfig))
-      _ <- Scenario.eval(addMails(chatsData, chat.id.toString, mails))
-      _ <-
-        if (mails.isEmpty) Scenario.eval(chat.send("No mails..."))
-        else Scenario.eval(chat.send(s"Unseen mail count: ${mails.size}"))
-          >> showMailInfos(chat, mails)
+      mailInfos: Either[DomainError, List[MailInfo]] <- Scenario.eval(imap.getUnseenMailInboxInfos(imapConfig))
+      _ <- mailInfos match
+        case Right(mails) =>
+          if (mails.isEmpty) Scenario.eval(chat.send("No mails..."))
+          else {
+            Scenario.eval(
+              addMails(chatsData, chat.id.toString, mails) >>
+                chat.send(s"Unseen mail count: ${mails.size}")
+            ) >> showMailInfos(chat, mails)
+          }
+        case Left(error) => handleError(chat, error.msg)
     } yield ()
 
   private def showMailContent(): Scenario[IO, Unit] =
@@ -88,8 +93,8 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]], config: Config)
       smtpConfig <- Scenario.eval(getSmtpConfig(user))
       result <- Scenario.eval(smtp.sendForward(smtpConfig, to, text, lastMessage.get))
       _ <- result match {
-        case Left (value) => Scenario.eval (chat.send (s"Error =( $value"))
         case Right (_) => Scenario.eval (chat.send ("Successful sent!!!"))
+        case Left(error) => handleError(chat, error.msg)
       }
     } yield ()
 
@@ -106,8 +111,8 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]], config: Config)
       smtpConfig <- Scenario.eval(getSmtpConfig(user))
       result <- Scenario.eval(smtp.sendReply(smtpConfig, to, text, lastMessage.get))
       _ <- result match {
-        case Left (value) => Scenario.eval (chat.send (s"Error =( $value"))
         case Right (_) => Scenario.eval (chat.send ("Successful sent!!!"))
+        case Left(error) => handleError(chat, error.msg)
       }
     } yield ()
 
@@ -179,6 +184,12 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]], config: Config)
       _ <-
         if (content.length <= 4096) { Scenario.eval(chat.send(content)) >> Scenario.eval(chat.send("/forward | /reply")) }
         else Scenario.eval(chat.send(content.substring(0, 4096))) >> sendMailContent(chat, content.substring(4096))
+    } yield ()
+
+  private def handleError(chat: Chat, errorMsg: String): Scenario[IO, Unit] =
+    for {
+      _ <- Scenario.eval(LogIO[IO].error(s"Chat id = ${chat.id}, error =$errorMsg"))
+      _ <- Scenario.eval(chat.send(s"Error=( $errorMsg"))
     } yield ()
 
   private def updateField[A](ref: Ref[IO, Map[String, ChatData]], chatId: String, updateFunc: ChatData => ChatData): IO[Unit] = {

@@ -1,9 +1,11 @@
 package com.pnp.mail
 
-import cats.effect.IO
-import cats.effect.kernel.Resource
+import cats.effect.syntax.all.*
+import cats.syntax.all.*
+import cats.effect.{IO, Resource}
 import Imap.*
 import com.pnp.domain.*
+import com.pnp.domain.DomainError.*
 import jakarta.mail.*
 import jakarta.mail.internet.*
 import jakarta.mail.search.FlagTerm
@@ -16,14 +18,21 @@ import java.util.{Objects, Properties}
 import scala.annotation.tailrec
 
 class Imap(log: LogIO[IO]) {
-  def getUnseenMailInboxInfos(imapConfig: ImapConfig): IO[List[MailInfo]] = {
-    makeStoreResource(imapConfig).use { store =>
-      Resource.fromAutoCloseable(IO(store.getFolder("INBOX"))).use { inbox =>
+  def getUnseenMailInboxInfos(imapConfig: ImapConfig): IO[Either[DomainError, List[MailInfo]]] = {
+    val folderResource: Resource[IO, Either[DomainError, Folder]] = for {
+      storeEither <- makeStoreResource(imapConfig)
+      folderEither <- storeEither match {
+        case Right(store) => makeFolderResource(store, "INBOX")
+        case Left(error) => Resource.pure[IO, Either[DomainError, Folder]](Either.left[DomainError, Folder](error))
+      }
+    } yield folderEither
+    folderResource.use {
+      case Right(inbox) =>
         IO {
           inbox.open(Folder.READ_ONLY)
           val search = inbox.search(FlagTerm(Flags(Flags.Flag.SEEN), false))
           if (search.isEmpty) {
-            List.empty
+            List.empty.asRight
           } else {
             inbox.fetch(search, fetchContentProfile)
             search.zipWithIndex.map { (message, index) =>
@@ -35,20 +44,28 @@ class Imap(log: LogIO[IO]) {
                 message.getAllRecipients.map { address => address.asInstanceOf[InternetAddress].getAddress }.mkString(","),
                 message.getSubject,
               )
-            }.toList
+            }.toList.asRight
           }
         }
-      }
+      case Left(error) => IO.pure(Either.left[DomainError, List[MailInfo]](error))
     }
   }
 
-  private def makeStoreResource(imapConfig: ImapConfig): Resource[IO, Store] = Resource.fromAutoCloseable {
-    IO {
-      val store = Session.getInstance(imapProperties).getStore
-      store.connect(imapConfig.host, imapConfig.port, imapConfig.user, imapConfig.pass)
-      store
-    }
-  }
+  private def makeStoreResource(imapConfig: ImapConfig): Resource[IO, Either[DomainError, Store]] =
+    Resource.make(IO {
+        Either.catchNonFatal {
+          val store = Session.getInstance(imapProperties).getStore
+          store.connect(imapConfig.host, imapConfig.port, imapConfig.user, imapConfig.pass)
+          store
+      }.leftMap { th => ImapGetMessageError(th.getMessage) }
+    })(either => IO { Either.catchNonFatal(either.foreach(_.close)) })
+
+  private def makeFolderResource(store:Store, name: String): Resource[IO, Either[DomainError, Folder]] =
+    Resource.make(IO {
+      Either.catchNonFatal {
+        store.getFolder("INBOX")
+      }.leftMap { th => ImapGetMessageError(th.getMessage) }
+    })(either => IO { Either.catchNonFatal(either.foreach(_.close)) })
 }
 
 object Imap {

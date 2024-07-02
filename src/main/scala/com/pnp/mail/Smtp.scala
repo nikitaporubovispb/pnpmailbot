@@ -25,8 +25,9 @@ class Smtp(log: LogIO[IO]) {
     val session = Session.getInstance(smtpProps(smtpConfig.host, smtpConfig.port))
     (for {
       message <- EitherT.fromEither[IO](messageCreator(session))
-      result <- EitherT(makeTransportResource(session, smtpConfig.user, smtpConfig.pass).use { transport =>
-        sendMessage(message, transport)
+      result <- EitherT(makeTransportResource(session, smtpConfig.user, smtpConfig.pass).use {
+          case Right(transport) => sendMessage(message, transport)
+          case Left(error) => IO(Either.left[DomainError, Unit](error))
       })
     } yield result).value
   }
@@ -107,13 +108,14 @@ class Smtp(log: LogIO[IO]) {
     }.leftMap { th => SmtpCreateMessageError(th.getMessage) }
   }
 
-  private def makeTransportResource(session: Session, user: String, pass:String): Resource[IO, Transport] =  Resource.fromAutoCloseable {
-      IO {
+  private def makeTransportResource(session: Session, user: String, pass:String): Resource[IO, Either[DomainError, Transport]] =
+    Resource.make(IO {
+      Either.catchNonFatal {
         val transport = session.getTransport("smtp")
         transport.connect(user, pass)
         transport
-      }
-    }
+      }.leftMap { th => SmtpSendMessageError(th.getMessage) }
+    })(either => IO { Either.catchNonFatal(either.foreach(_.close)) })
 
   private def sendMessage(message: Message, transport: Transport) : IO[Either[DomainError, Unit]] = IO.blocking {
     Either.catchNonFatal { transport.sendMessage(message, message.getAllRecipients) }

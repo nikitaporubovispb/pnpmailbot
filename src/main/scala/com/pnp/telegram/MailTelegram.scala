@@ -3,6 +3,7 @@ package com.pnp.telegram
 import canoe.api.*
 import canoe.models.{Chat, Update}
 import canoe.syntax.*
+import cats.data.*
 import cats.effect.{IO, Ref}
 import cats.syntax.all.*
 import com.pnp.domain.{ConfigType, *}
@@ -69,7 +70,10 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]], config: Config)
     for {
       textMessage <- Scenario.expect(command("show_mail"))
       _ <- Scenario.eval(LogIO[IO].info("show_mail"))
-      mailOption <- Scenario.eval(getMail(chatsData, textMessage.chat.id.toString, getMailIndex(textMessage.text)))
+      mailOption <- Scenario.eval((for {
+        index <- OptionT.fromOption[IO](getMailIndex(textMessage.text))
+        mail <- OptionT(getMail(chatsData, textMessage.chat.id.toString, index))
+      } yield mail).value)
       _ <- mailOption match {
         case Some(mailInfo) =>
           Scenario.eval(addLastMessage(chatsData, textMessage.chat.id.toString, mailInfo.message))
@@ -82,17 +86,22 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]], config: Config)
     for {
       chat <- Scenario.expect(command("forward").chat)
       _ <- Scenario.eval(LogIO[IO].info("forward"))
-      _ <- Scenario.eval(chat.send("To"))
-      to <- Scenario.expect(text)
-      _ <- Scenario.eval(chat.send("Text"))
-      text <- Scenario.expect(text)
-      lastMessage <- Scenario.eval(getLastMessage(chatsData, chat.id.toString))
-      user <- getUser(chat)
-      smtpConfig <- Scenario.eval(getSmtpConfig(user))
-      result <- Scenario.eval(smtp.sendForward(smtpConfig, to, text, lastMessage.get))
-      _ <- result match {
-        case Right (_) => Scenario.eval(chat.send ("Successful sent!!!"))
-        case Left(error) => handleError(chat, error.msg)
+      lastMessageOpt <- Scenario.eval(getLastMessage(chatsData, chat.id.toString))
+      _ <- lastMessageOpt match {
+        case Some(lastMessage) => for {
+          _ <- Scenario.eval(chat.send("To"))
+          to <- Scenario.expect(text)
+          _ <- Scenario.eval(chat.send("Text"))
+          text <- Scenario.expect(text)
+          user <- getUser(chat)
+          smtpConfig <- Scenario.eval(getSmtpConfig(user))
+          result <- Scenario.eval(smtp.sendForward(smtpConfig, to, text, lastMessage))
+          _ <- result match {
+            case Right (_) => Scenario.eval(chat.send ("Successful sent!!!"))
+            case Left(error) => handleError(chat, error.msg)
+          }
+        } yield ()
+        case None => handleError(chat, "No last message")
       }
     } yield ()
 
@@ -100,17 +109,22 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]], config: Config)
     for {
       chat <- Scenario.expect(command("reply").chat)
       _ <- Scenario.eval(LogIO[IO].info("reply"))
-      _ <- Scenario.eval(chat.send("To"))
-      to <- Scenario.expect(text)
-      _ <- Scenario.eval(chat.send("Text"))
-      text <- Scenario.expect(text)
-      lastMessage <- Scenario.eval(getLastMessage(chatsData, chat.id.toString))
-      user <- getUser(chat)
-      smtpConfig <- Scenario.eval(getSmtpConfig(user))
-      result <- Scenario.eval(smtp.sendReply(smtpConfig, to, text, lastMessage.get))
-      _ <- result match {
-        case Right (_) => Scenario.eval (chat.send ("Successful sent!!!"))
-        case Left(error) => handleError(chat, error.msg)
+      lastMessageOpt <- Scenario.eval(getLastMessage(chatsData, chat.id.toString))
+      _ <- lastMessageOpt match {
+        case Some(lastMessage) => for {
+          _ <- Scenario.eval(chat.send("To"))
+          to <- Scenario.expect(text)
+          _ <- Scenario.eval(chat.send("Text"))
+          text <- Scenario.expect(text)
+          user <- getUser(chat)
+          smtpConfig <- Scenario.eval(getSmtpConfig(user))
+          result <- Scenario.eval(smtp.sendReply(smtpConfig, to, text, lastMessage))
+          _ <- result match {
+            case Right (_) => Scenario.eval(chat.send ("Successful sent!!!"))
+            case Left(error) => handleError(chat, error.msg)
+          }
+        } yield ()
+        case None => handleError(chat, "No last message")
       }
     } yield ()
 
@@ -186,7 +200,7 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]], config: Config)
 
   private def handleError(chat: Chat, errorMsg: String): Scenario[IO, Unit] =
     for {
-      _ <- Scenario.eval(LogIO[IO].error(s"Chat id = ${chat.id}, error =$errorMsg"))
+      _ <- Scenario.eval(LogIO[IO].error(s"Chat id = ${chat.id}, error = $errorMsg"))
       _ <- Scenario.eval(chat.send(s"Error=( $errorMsg"))
     } yield ()
 
@@ -219,22 +233,22 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]], config: Config)
     getField(ref, chatId, _.lastMessage)
   }
 
-  private def getMailIndex(text: String): Int = {
+  private def getMailIndex(text: String): Option[Int] = {
     val lastIndex = text.lastIndexOf('_')
-    text.substring(lastIndex + 1).toInt
+    Try(text.substring(lastIndex + 1).toInt).toOption
   }
 
   private def getSmtpConfig(userOpt: Option[DbUser]): IO[SmtpConfig] = {
       userOpt match
         case Some(DbUser(userId, _, _)) => interaction.getMailConfig(userId, ConfigType.Smtp)
           .map { dbConfigOpt => dbConfigOpt.fold(config.smtp)(dbSmtp => SmtpConfig(dbSmtp.host, dbSmtp.port, dbSmtp.user, dbSmtp.password)) }
-        case None => IO(config.smtp)
+        case None => IO.pure(config.smtp)
     }
 
   private def getImapConfig(userOpt: Option[DbUser]): IO[ImapConfig] = {
     userOpt match
       case Some(DbUser(userId, _, _)) => interaction.getMailConfig(userId, ConfigType.Imap)
         .map { dbConfigOpt => dbConfigOpt.fold(config.imap)(dbImap => ImapConfig(dbImap.host, dbImap.port, dbImap.user, dbImap.password)) }
-      case None => IO(config.imap)
+      case None => IO.pure(config.imap)
   }
 }

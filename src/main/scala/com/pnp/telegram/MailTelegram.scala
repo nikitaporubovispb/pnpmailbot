@@ -12,6 +12,8 @@ import fs2.Stream
 import jakarta.mail.Message
 import logstage.LogIO
 
+import scala.util.Try
+
 class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]], config: Config)
                   (using log: LogIO[IO], tc: TelegramClient[IO], imap: Imap, smtp: Smtp, interaction: InteractionService) {
   def stream: Stream[IO, Update] =
@@ -51,17 +53,15 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]], config: Config)
       user <- getUser(chat)
       _ <- Scenario.eval(LogIO[IO].info("Fetch unseen mail scenario started."))
       _ <- Scenario.eval(chat.send("Start fetching INBOX..."))
-      imapConfig: ImapConfig <- Scenario.eval(getImapConfig(user))
-      mailInfos: Either[DomainError, List[MailInfo]] <- Scenario.eval(imap.getUnseenMailInboxInfos(imapConfig))
+      imapConfig <- Scenario.eval(getImapConfig(user))
+      mailInfos <- Scenario.eval(imap.getUnseenMailInboxInfos(imapConfig))
       _ <- mailInfos match
         case Right(mails) =>
           if (mails.isEmpty) Scenario.eval(chat.send("No mails..."))
-          else {
-            Scenario.eval(
-              addMails(chatsData, chat.id.toString, mails) >>
-                chat.send(s"Unseen mail count: ${mails.size}")
-            ) >> showMailInfos(chat, mails)
-          }
+          else Scenario.eval(
+            addMails(chatsData, chat.id.toString, mails) >>
+              chat.send(s"Unseen mail count: ${mails.size}")
+          ) >> showMailInfos(chat, mails)
         case Left(error) => handleError(chat, error.msg)
     } yield ()
 
@@ -91,7 +91,7 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]], config: Config)
       smtpConfig <- Scenario.eval(getSmtpConfig(user))
       result <- Scenario.eval(smtp.sendForward(smtpConfig, to, text, lastMessage.get))
       _ <- result match {
-        case Right (_) => Scenario.eval (chat.send ("Successful sent!!!"))
+        case Right (_) => Scenario.eval(chat.send ("Successful sent!!!"))
         case Left(error) => handleError(chat, error.msg)
       }
     } yield ()
@@ -142,8 +142,8 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]], config: Config)
       smtpUser <- Scenario.expect(text)
       _ <- Scenario.eval(chat.send("Smtp pass?"))
       smtpPass <- Scenario.expect(text)
-      _ <- Scenario.eval(interaction.addMailConfig(DbMailConfig(-1L, user.id, ConfigType.Imap.id, imapHost, imapPort.toInt, imapUser, imapPass)))
-      _ <- Scenario.eval(interaction.addMailConfig(DbMailConfig(-1L, user.id, ConfigType.Smtp.id, smtpHost, smtpPort.toInt, smtpUser, smtpPass)))
+      _ <- Scenario.eval(interaction.addMailConfig(DbMailConfig(-1L, user.id, ConfigType.Imap.id, imapHost, imapPort.toInt, imapUser, imapPass))
+                      >> interaction.addMailConfig(DbMailConfig(-1L, user.id, ConfigType.Smtp.id, smtpHost, smtpPort.toInt, smtpUser, smtpPass)))
     } yield ()
 
   private def getUser(chat: Chat): Scenario[IO, Option[DbUser]] =
@@ -159,7 +159,7 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]], config: Config)
       _ <- Scenario.eval(chat.send("New user!!!"))
       _ <- Scenario.eval(chat.send("Should you use shared mail config(type anything/'false') or own(type 'true')?"))
       isExternalConfigText <- Scenario.expect(text)
-      isExternalConfig = Either.catchNonFatal { isExternalConfigText.toBoolean }.fold(th => false, b => b)
+      isExternalConfig = Try(isExternalConfigText.toBoolean).fold(th => false, b => b)
       _ <- Scenario.eval(interaction.register(chat.id.toString, isExternalConfig))
       userOpt <- Scenario.eval(interaction.getUser(chat.id.toString))
       - <- userOpt match

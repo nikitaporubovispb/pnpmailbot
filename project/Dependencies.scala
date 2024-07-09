@@ -10,6 +10,8 @@ object Dependencies {
     val mail = "2.0.1"
     val jsoup = "1.17.2"
     val skunk = "1.1.0-M3"
+    val scalatest = "3.2.18"
+    val catsEffectTesting = "1.5.0"
   }
 
   val distage: Seq[ModuleID] = Seq(
@@ -24,6 +26,8 @@ object Dependencies {
     "com.sun.mail"          % "jakarta.mail"      % Versions.mail,
     "org.jsoup"             % "jsoup"             % Versions.jsoup,
     "org.tpolecat"          %% "skunk-core"       % Versions.skunk,
+    "org.scalatest"         %% "scalatest"                     % Versions.scalatest          % Test,
+    "org.typelevel"         %% "cats-effect-testing-scalatest" %  Versions.catsEffectTesting % Test
   )
 
   val all: Seq[ModuleID] = misc ++ distage

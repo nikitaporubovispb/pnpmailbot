@@ -9,6 +9,11 @@ case class BotConfig(
   apiKey: String
 )
 
+case class EncryptionConfig(
+  key: String,
+  iv: String
+)
+
 case class SmtpConfig(
   host: String,
   port: Int,
@@ -33,6 +38,7 @@ case class DbConfig(
 
 case class Config(
   bot: BotConfig,
+  encryptionConfig: EncryptionConfig,
   smtp: SmtpConfig,
   imap: ImapConfig,
   database: DbConfig,

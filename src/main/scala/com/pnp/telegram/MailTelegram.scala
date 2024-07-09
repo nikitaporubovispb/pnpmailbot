@@ -9,6 +9,7 @@ import cats.syntax.all.*
 import com.pnp.domain.{ConfigType, *}
 import com.pnp.mail.{Imap, Smtp}
 import com.pnp.service.InteractionService
+import com.pnp.utils.EncryptionUtils
 import fs2.Stream
 import jakarta.mail.Message
 import logstage.LogIO
@@ -16,7 +17,7 @@ import logstage.LogIO
 import scala.util.Try
 
 class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]], config: Config)
-                  (using log: LogIO[IO], tc: TelegramClient[IO], imap: Imap, smtp: Smtp, interaction: InteractionService) {
+                  (using log: LogIO[IO], tc: TelegramClient[IO], imap: Imap, smtp: Smtp, interaction: InteractionService, encryptionUtils: EncryptionUtils) {
   def stream: Stream[IO, Update] =
     Bot.polling[IO]
       .follow(start(), sendMail(), fetchUnseen(), showMailContent(), forwardMail(), replyMail())
@@ -145,8 +146,9 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]], config: Config)
       imapPort <- Scenario.expect(text)
       _ <- Scenario.eval(chat.send("Imap user?"))
       imapUser <- Scenario.expect(text)
-      _ <- Scenario.eval(chat.send("Imap pass?"))
-      imapPass <- Scenario.expect(text)
+      _ <- Scenario.eval(chat.send("Imap pass? After you send the message it will be deleted"))
+      imapPass <- Scenario.expect(textMessage)
+      _ <- Scenario.eval(chat.send("Your password is stored.")) >> Scenario.eval(imapPass.delete)
       _ <- Scenario.eval(chat.send("Smtp config:"))
       _ <- Scenario.eval(chat.send("Smtp host?"))
       smtpHost <- Scenario.expect(text)
@@ -154,10 +156,11 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]], config: Config)
       smtpPort <- Scenario.expect(text)
       _ <- Scenario.eval(chat.send("Smtp user?"))
       smtpUser <- Scenario.expect(text)
-      _ <- Scenario.eval(chat.send("Smtp pass?"))
-      smtpPass <- Scenario.expect(text)
-      _ <- Scenario.eval(interaction.addMailConfig(DbMailConfig(-1L, user.id, ConfigType.Imap.id, imapHost, imapPort.toInt, imapUser, imapPass))
-                      >> interaction.addMailConfig(DbMailConfig(-1L, user.id, ConfigType.Smtp.id, smtpHost, smtpPort.toInt, smtpUser, smtpPass)))
+      _ <- Scenario.eval(chat.send("Smtp pass? After you send the message it will be deleted"))
+      smtpPass <- Scenario.expect(textMessage)
+      _ <- Scenario.eval(chat.send("Your password is stored.")) >> Scenario.eval(smtpPass.delete)
+      _ <- Scenario.eval(interaction.addMailConfig(DbMailConfig(-1L, user.id, ConfigType.Imap.id, imapHost, imapPort.toInt, imapUser, encryptionUtils.encrypt(imapPass.text)))
+                      >> interaction.addMailConfig(DbMailConfig(-1L, user.id, ConfigType.Smtp.id, smtpHost, smtpPort.toInt, smtpUser, encryptionUtils.encrypt(smtpPass.text))))
     } yield ()
 
   private def getUser(chat: Chat): Scenario[IO, Option[DbUser]] =
@@ -171,9 +174,12 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]], config: Config)
   private def addNewUser(chat: Chat): Scenario[IO, Option[DbUser]] =
     for {
       _ <- Scenario.eval(chat.send("New user!!!"))
-      _ <- Scenario.eval(chat.send("Should you use shared mail config(type anything/'false') or own(type 'true')?"))
+      _ <- Scenario.eval(chat.send("Should you use shared mail config(type anything/'false') or own(type +/'true')?"))
       isExternalConfigText <- Scenario.expect(text)
-      isExternalConfig = Try(isExternalConfigText.toBoolean).fold(th => false, b => b)
+      isExternalConfig = Try(isExternalConfigText match
+        case "+" => true
+        case _ => isExternalConfigText.toBoolean
+      ).fold(th => false, b => b)
       _ <- Scenario.eval(interaction.register(chat.id.toString, isExternalConfig))
       userOpt <- Scenario.eval(interaction.getUser(chat.id.toString))
       - <- userOpt match
@@ -241,14 +247,14 @@ class MailTelegram(chatsData: Ref[IO, Map[String, ChatData]], config: Config)
   private def getSmtpConfig(userOpt: Option[DbUser]): IO[SmtpConfig] = {
       userOpt match
         case Some(DbUser(userId, _, _)) => interaction.getMailConfig(userId, ConfigType.Smtp)
-          .map { dbConfigOpt => dbConfigOpt.fold(config.smtp)(dbSmtp => SmtpConfig(dbSmtp.host, dbSmtp.port, dbSmtp.user, dbSmtp.password)) }
+          .map { dbConfigOpt => dbConfigOpt.fold(config.smtp)(dbSmtp => SmtpConfig(dbSmtp.host, dbSmtp.port, dbSmtp.user, encryptionUtils.decrypt(dbSmtp.password))) }
         case None => IO.pure(config.smtp)
     }
 
   private def getImapConfig(userOpt: Option[DbUser]): IO[ImapConfig] = {
     userOpt match
       case Some(DbUser(userId, _, _)) => interaction.getMailConfig(userId, ConfigType.Imap)
-        .map { dbConfigOpt => dbConfigOpt.fold(config.imap)(dbImap => ImapConfig(dbImap.host, dbImap.port, dbImap.user, dbImap.password)) }
+        .map { dbConfigOpt => dbConfigOpt.fold(config.imap)(dbImap => ImapConfig(dbImap.host, dbImap.port, dbImap.user, encryptionUtils.decrypt(dbImap.password))) }
       case None => IO.pure(config.imap)
   }
 }

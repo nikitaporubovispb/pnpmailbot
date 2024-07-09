@@ -6,11 +6,12 @@ import com.pnp.domain.*
 import com.pnp.mail.{Imap, Smtp}
 import com.pnp.service.InteractionService
 import com.pnp.telegram.MailTelegram
+import com.pnp.utils.EncryptionUtils
 import fs2.Stream
 import logstage.LogIO
 
 object Telegram {
-  def run(using smtp: Smtp, imap: Imap, config: Config, log: LogIO[IO], interaction: InteractionService): IO[Unit] = {
+  def run(using smtp: Smtp, imap: Imap, config: Config, log: LogIO[IO], interaction: InteractionService, encryptionUtils: EncryptionUtils): IO[Unit] = {
     Stream
       .resource(TelegramClient[IO](config.bot.apiKey))
       .flatMap { case given TelegramClient[IO] =>

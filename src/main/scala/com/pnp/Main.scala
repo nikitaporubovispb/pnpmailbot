@@ -6,6 +6,7 @@ import com.pnp.domain.{Config, DbMailConfig}
 import com.pnp.mail.{Imap, Smtp}
 import com.pnp.service.InteractionService
 import com.pnp.telegram.Telegram
+import com.pnp.utils.EncryptionUtils
 import org.typelevel.otel4s.trace.Tracer
 import izumi.logstage.api.IzLogger
 import logstage.LogIO
@@ -40,7 +41,8 @@ object Main extends IOApp {
     resources.use { case (config, log, interaction) =>
         val smtp = Smtp(log)
         val imap = Imap(log)
-        Telegram.run(using smtp, imap, config, log, interaction)
+        val encryptionUtils = EncryptionUtils(config.encryptionConfig)
+        Telegram.run(using smtp, imap, config, log, interaction, encryptionUtils)
       }.as(ExitCode.Success)
   }
 }

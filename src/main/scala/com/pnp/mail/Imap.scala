@@ -63,7 +63,7 @@ class Imap(log: LogIO[IO]) {
   private def makeFolderResource(store:Store, name: String): Resource[IO, Either[DomainError, Folder]] =
     Resource.make(IO {
       Either.catchNonFatal {
-        store.getFolder("INBOX")
+        store.getFolder(name)
       }.leftMap { th => ImapGetMessageError(th.getMessage) }
     })(either => IO { Either.catchNonFatal(either.foreach(_.close)) })
 }
@@ -88,8 +88,7 @@ object Imap {
     Jsoup.clean(Jsoup.parse(content).html, "", Safelist.none)
   }
 
-  @tailrec
-  private def parseContent(part: Part): List[MailContent] = {
+  @tailrec private def parseContent(part: Part): List[MailContent] = {
     val content = part.getContent
     if (content == null) {
       List.empty
@@ -125,7 +124,7 @@ object Imap {
       .head)
   }
 
-  def getCleanedContent(contentType: String, content: String): String = {
+  private def getCleanedContent(contentType: String, content: String): String = {
     if (contentType == null || content == null) return content
     cleanHtmlContent(content)
   }

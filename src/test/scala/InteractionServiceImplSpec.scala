@@ -1,8 +1,8 @@
 import cats.effect.IO
 import cats.effect.testing.scalatest.AsyncIOSpec
 import com.pnp.dao.*
+import com.pnp.dao.MailConfigDao.ConfigType
 import com.pnp.domain.*
-import com.pnp.service.InteractionService.RegisterResult.*
 import com.pnp.service.InteractionServiceImpl
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
@@ -16,9 +16,17 @@ class InteractionServiceImplSpec extends AsyncWordSpec with AsyncIOSpec with Mat
         override def getUserByTelegramId(idTelegram: String): IO[Option[DbUser]] =
             IO.pure(users.values.find(_.telegramId == idTelegram))
 
-        override def createUser(telegramId: String, isExternalConfig: Boolean): IO[Unit] = IO {
+        override def createUser(telegramId: String, isExternalConfig: Boolean): IO[Long] = IO {
             val newUser = DbUser(users.size + 1, telegramId, isExternalConfig)
             users = users.updated(newUser.id, newUser)
+            newUser.id
+        }
+
+        override def updateUser(id: Long, isExternalConfig: Boolean): IO[Unit] = IO {
+            val user = users.get(id)
+            user.fold
+                { IO.raiseError(RuntimeException("No user!!")) }
+                { user => users = users.updated(user.id, user.copy(isExternalConfig = isExternalConfig)) }
         }
     }
 
@@ -29,76 +37,120 @@ class InteractionServiceImplSpec extends AsyncWordSpec with AsyncIOSpec with Mat
         override def createConfig(mailConfig: DbMailConfig): IO[Unit] = IO {
             configs = configs.updated((mailConfig.userId, mailConfig.configType), mailConfig)
         }
+
+        override def removeConfigByUserId(userId: Long): IO[Unit] = IO {
+            configs = configs.view.filterKeys((id, _) => id != userId).toMap
+        }
     }
 
-    val testUserDao: TestUserDao = TestUserDao(Map(1L -> DbUser(1L, "existingTelegramId", isExternalConfig = false)))
-    val testMailConfigDao: TestMailConfigDao = TestMailConfigDao()
+    val userId: Long = 0L
+    val testUserDao: TestUserDao = TestUserDao(Map(userId -> DbUser(userId, "existingTelegramId", false)))
+
+    val imapConfig: DbMailConfig = DbMailConfig(Some(0L), userId, ConfigType.Imap.id, "imap.example.com", 993, "user", "password")
+    val smtpConfig: DbMailConfig = DbMailConfig(Some(0L), userId, ConfigType.Smtp.id, "smtp.example.com", 587, "user", "password")
+
+    val testMailConfigDao: TestMailConfigDao = TestMailConfigDao(Map(
+        (0L, ConfigType.Imap.id) -> imapConfig,
+        (0L, ConfigType.Smtp.id) -> smtpConfig
+    ))
 
     val service = new InteractionServiceImpl(testUserDao, testMailConfigDao)
 
-    "InteractionServiceImpl" should {
+    "InteractionService" should {
 
-        "return true if the user is registered" in {
-            service.isRegistered("existingTelegramId").asserting(_ shouldBe true)
-        }
-
-        "return false if the user is not registered" in {
-            service.isRegistered("newTelegramId").asserting(_ shouldBe false)
-        }
-
-        "register a new user if not already registered" in {
-            val telegramId = "newTelegramId"
-            val isExternalConfig = false
+        "create a new user" in {
             for {
-                result <- service.register(telegramId, isExternalConfig)
-                _ = result shouldBe Ok
-                _ = testUserDao.users.values.map(_.telegramId) should contain(telegramId)
-            } yield succeed
+                userId <- service.createUser("newTelegramId", false, None)
+                user <- testUserDao.getUser(userId)
+            } yield {
+                user shouldBe defined
+                user.get.telegramId shouldBe "newTelegramId"
+                user.get.isExternalConfig shouldBe false
+            }
         }
 
-        "not register a user if already registered" in {
-            val telegramId = "existingTelegramId"
-            val isExternalConfig = false
+        "create a new user with mail configs" in {
+            val imapConfig = MailConfig.ImapMailConfig("imap.example.com", 993, "user", "password")
+            val smtpConfig = MailConfig.SmtpMailConfig("smtp.example.com", 587, "user", "password")
+            val mailConfigs = Some((imapConfig, smtpConfig))
+
             for {
-                result <- service.register(telegramId, isExternalConfig)
-                _ = result shouldBe AlreadyRegistered
-                _ = testUserDao.users.values.map(_.telegramId) should contain (telegramId)
-            } yield succeed
+                userId <- service.createUser("newTelegramIdWithConfigs", true, mailConfigs)
+                user <- testUserDao.getUser(userId)
+                imapConfigFromDb <- testMailConfigDao.getConfig(userId, ConfigType.Imap.id)
+                smtpConfigFromDb <- testMailConfigDao.getConfig(userId, ConfigType.Smtp.id)
+            } yield {
+                user shouldBe defined
+                user.get.telegramId shouldBe "newTelegramIdWithConfigs"
+                user.get.isExternalConfig shouldBe true
+
+                imapConfigFromDb shouldBe defined
+                imapConfigFromDb.get.host shouldBe "imap.example.com"
+
+                smtpConfigFromDb shouldBe defined
+                smtpConfigFromDb.get.host shouldBe "smtp.example.com"
+            }
         }
 
-        "return user if exists" in {
-            val telegramId = "existingTelegramId"
-            service.getUser(telegramId).asserting(_ shouldBe Some(DbUser(1, telegramId, false)))
-        }
+        "update an existing user with new mail configs" in {
+            val imapConfig = MailConfig.ImapMailConfig("imap.example.com", 993, "user", "password")
+            val smtpConfig = MailConfig.SmtpMailConfig("smtp.example.com", 587, "user", "password")
+            val mailConfigs = Some((imapConfig, smtpConfig))
 
-        "return None if not exists" in {
-            val telegramId = "nonExistingTelegramId"
-            service.getUser(telegramId).asserting(_ shouldBe None)
-        }
-
-        "add mail configuration" in {
-            val mailConfig = DbMailConfig(1, 1, ConfigType.Imap.id, "imap.example.com", 993, "user", "password")
             for {
-                _ <- service.addMailConfig(mailConfig)
-                _ = testMailConfigDao.configs should contain((mailConfig.userId, mailConfig.configType) -> mailConfig)
-            } yield succeed
+                _ <- service.updateUser(userId, true, mailConfigs)
+                user <- testUserDao.getUser(userId)
+                imapConfigFromDb <- testMailConfigDao.getConfig(userId, ConfigType.Imap.id)
+                smtpConfigFromDb <- testMailConfigDao.getConfig(userId, ConfigType.Smtp.id)
+            } yield {
+                user shouldBe defined
+                user.get.isExternalConfig shouldBe true
+
+                imapConfigFromDb shouldBe defined
+                imapConfigFromDb.get.host shouldBe "imap.example.com"
+                imapConfigFromDb.get.user shouldBe "user"
+                imapConfigFromDb.get.password shouldBe "password"
+
+                smtpConfigFromDb shouldBe defined
+                smtpConfigFromDb.get.host shouldBe "smtp.example.com"
+                smtpConfigFromDb.get.user shouldBe "user"
+                smtpConfigFromDb.get.password shouldBe "password"
+            }
         }
 
-        "get mail configuration if exists" in {
-            val userId = 1L
-            val configType = ConfigType.Imap
-            val mailConfig = DbMailConfig(1, userId, configType.id, "imap.example.com", 993, "user", "password")
-            val testMailConfigDaoWithConfig = TestMailConfigDao(Map((userId, configType.id) -> mailConfig))
-            val serviceWithConfig = new InteractionServiceImpl(testUserDao, testMailConfigDaoWithConfig)
-            serviceWithConfig.getMailConfig(userId, configType).asserting(_ shouldBe Some(mailConfig))
+        "get an existing user by telegramId" in {
+            for {
+                userOpt <- service.getUser("existingTelegramId")
+            } yield {
+                userOpt shouldBe defined
+                userOpt.get.id shouldBe userId
+            }
         }
 
-        "get None if not exists" in {
-            val userId = 1L
-            val configType = ConfigType.Imap
-            val testMailConfigDaoWithConfig = TestMailConfigDao(Map.empty)
-            val serviceWithConfig = new InteractionServiceImpl(testUserDao, testMailConfigDaoWithConfig)
-            serviceWithConfig.getMailConfig(userId, configType).asserting(_ shouldBe None)
+        "return None for non-existing user" in {
+            for {
+                userOpt <- service.getUser("nonExistingTelegramId")
+            } yield {
+                userOpt shouldBe empty
+            }
+        }
+
+        "get IMAP mail configuration for a user" in {
+            for {
+                configOpt <- service.getMailImapConfig(userId)
+            } yield {
+                configOpt shouldBe defined
+                configOpt.get.host shouldBe "imap.example.com"
+            }
+        }
+
+        "get SMTP mail configuration for a user" in {
+            for {
+                configOpt <- service.getMailSmtpConfig(userId)
+            } yield {
+                configOpt shouldBe defined
+                configOpt.get.host shouldBe "smtp.example.com"
+            }
         }
     }
 }

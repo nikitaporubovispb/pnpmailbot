@@ -1,12 +1,22 @@
 package com.pnp.utils
 
+import cats.effect.IO
 import com.pnp.domain.EncryptionConfig
 
 import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.spec.*
 
-class EncryptionUtils(private val encryptionConfig: EncryptionConfig) {
+trait EncryptionUtils {
+  def encrypt(data: String): String;
+  def decrypt(data: String): String
+}
+
+object EncryptionUtils {
+  def make(encryptionConfig: EncryptionConfig): IO[EncryptionUtils] = IO { EncryptionUtilsImpl(encryptionConfig) }
+}
+
+class EncryptionUtilsImpl(private val encryptionConfig: EncryptionConfig) extends EncryptionUtils{
   private val algorithm = "AES/CBC/PKCS5Padding"
   //  private val key = "0123456789abcdef" // 16 bytes key  
   //  private val iv = "abcdef9876543210" // 16 bytes IV

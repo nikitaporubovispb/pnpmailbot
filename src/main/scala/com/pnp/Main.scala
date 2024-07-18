@@ -1,10 +1,10 @@
 package com.pnp
 
-import cats.effect.{ExitCode, IO, IOApp, Resource}
+import cats.effect.{ExitCode, IO, IOApp, Ref, Resource}
 import com.pnp.dao.{MailConfigDao, UserDao}
-import com.pnp.domain.{Config, DbMailConfig}
-import com.pnp.mail.{Imap, Smtp}
-import com.pnp.service.InteractionService
+import com.pnp.domain.{ChatData, Config, DbMailConfig}
+import com.pnp.service.{InteractionService, MailRepositoryService}
+import com.pnp.service.mail.{ImapService, SmtpService}
 import com.pnp.telegram.Telegram
 import com.pnp.utils.EncryptionUtils
 import org.typelevel.otel4s.trace.Tracer
@@ -37,12 +37,13 @@ object Main extends IOApp {
       userDao <- UserDao.make(using session, log).toResource
       mailConfigDao <- MailConfigDao.make(using session, log).toResource
       interaction <- InteractionService.from(userDao, mailConfigDao).toResource
-    } yield (config, log, interaction)
-    resources.use { case (config, log, interaction) =>
-        val smtp = Smtp(log)
-        val imap = Imap(log)
-        val encryptionUtils = EncryptionUtils(config.encryptionConfig)
-        Telegram.run(using smtp, imap, config, log, interaction, encryptionUtils)
+      smtp <- SmtpService.make(using log).toResource
+      imap <- ImapService.make(using log).toResource
+      encryptionUtils <- EncryptionUtils.make(config.encryptionConfig).toResource
+      mailRepository <- Ref.of[IO, Map[String, ChatData]](Map.empty).flatMap(MailRepositoryService.make).toResource
+    } yield (config, log, interaction, mailRepository, smtp, imap, encryptionUtils)
+    resources.use { case (config, log, interaction, mailRepository, smtp, imap, encryptionUtils) =>
+        Telegram.run(using mailRepository, smtp, imap, config, log, interaction, encryptionUtils)
       }.as(ExitCode.Success)
   }
 }

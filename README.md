@@ -59,6 +59,11 @@ bot = {
   api-key = "???"
 }
 
+encryption-config = {
+  key = "0123456789abcdef"
+  iv = "abcdef9876543210"
+}
+
 database = {
   host = "localhost",
   port = 5433,

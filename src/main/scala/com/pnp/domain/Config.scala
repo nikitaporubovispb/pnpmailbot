@@ -46,6 +46,6 @@ case class Config(
 
 object Config {
   def load: IO[Config] = IO {
-    ConfigSource.default.loadOrThrow[Config]
+    ConfigSource.file("./application.conf").recoverWith { case _ => ConfigSource.default }.loadOrThrow[Config]
   }
 }

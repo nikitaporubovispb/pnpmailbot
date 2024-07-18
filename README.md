@@ -42,12 +42,6 @@ services:
       - "5433:5432"
     environment:
       POSTGRES_PASSWORD: example
-
-  adminer:
-    image: adminer
-    restart: always
-    ports:
-      - 8080:8080
 ```
 
 ##  Настройки 
@@ -72,17 +66,27 @@ database = {
   password: "example"
 }
 
-smtp = {
-  host = "localhost",
-  port = 1025
-  user = "user",
+imap {
+  host = "imap.example.com",
+  port = 993
+  user = "user@example.com",
   pass = "password"
 }
 
-imap {
-  host = "localhost",
-  port = 993
-  user = "user",
+smtp = {
+  host = "smtp.example.com",
+  port = 583
+  user = "user@example.com"
   pass = "password"
 }
+
+
 ```
+
+### Сборка
+
+#### FatJar
+
+1. sbt assembly
+2. рядом с pnpmailbot.jar положить "application.conf" (который при разработке "resource/application.conf")  
+3. java -jar pnpmailbot.jar
